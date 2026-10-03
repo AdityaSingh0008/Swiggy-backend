@@ -79,7 +79,7 @@ router.get('/', optionalAuth, async (req, res) => {
         
         const qParam = q ? encodeURIComponent(q) : 'cafe';
         
-        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${qParam}&limit=20&viewbox=${viewbox}&bounded=1`;
+        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${qParam}&limit=20&viewbox=${viewbox}&bounded=1&accept-language=en`;
         
         const response = await fetch(nomUrl, {
           headers: { 'User-Agent': 'SwiggyPlusInterviewApp/1.0' }
