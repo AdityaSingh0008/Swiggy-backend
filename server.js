@@ -49,6 +49,15 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
 
+// Fallback routes in case the frontend VITE_API_URL is misconfigured without /api
+app.use('/auth', authRoutes);
+app.use('/cafes', cafeRoutes);
+app.use('/checkins', checkinRoutes);
+app.use('/favorites', favoriteRoutes);
+app.use('/reviews', reviewRoutes);
+app.use('/users', userRoutes);
+app.use('/ai', aiRoutes);
+
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
 
 app.use((err, req, res, next) => {
