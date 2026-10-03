@@ -69,58 +69,91 @@ router.get('/', optionalAuth, async (req, res) => {
     
     let upsertedIds = new Set();
     
-    // 1. Fetch real places from Nominatim (OpenStreetMap) dynamically (no API key needed!)
+    // 1. Fetch real places dynamically
     if (lat && lng) {
       try {
-        const degreeOffset = (radius ? Number(radius) : 10) / 111; // rough degree approx
-        const left = Number(lng) - degreeOffset;
-        const right = Number(lng) + degreeOffset;
-        const top = Number(lat) + degreeOffset;
-        const bottom = Number(lat) - degreeOffset;
-        const viewbox = `${left},${top},${right},${bottom}`;
+        const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+        const useGoogle = apiKey && apiKey !== 'YOUR_GOOGLE_PLACES_API_KEY_HERE';
         
-        const qParam = q ? encodeURIComponent(q) : 'cafe';
-        
-        const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${qParam}&limit=20&viewbox=${viewbox}&bounded=1&accept-language=en`;
-        
-        const response = await fetch(nomUrl, {
-          headers: { 'User-Agent': 'SwiggyPlusInterviewApp/1.0' }
-        });
-        const data = await response.json();
-        
-        if (data && data.length > 0) {
-          // Upsert Nominatim places to our local DB
-          const upsertPromises = data.map(async (place) => {
-            if (place.class !== 'amenity' && place.class !== 'shop') return null;
-            
-            // Generate a random stable photo for the place since OSM doesn't provide photos
-            const photoId = Math.abs(Number(place.osm_id)) % 20;
-            const fallbackImage = `https://images.unsplash.com/photo-${1495474472287 + photoId}-4d71bcdd2085?w=800&q=80`;
-            
-            return Cafe.findOneAndUpdate(
-              { externalId: `osm_${place.osm_id}` },
-              {
-                name: place.name || 'Local Cafe',
-                externalId: `osm_${place.osm_id}`,
-                address: place.display_name.split(',').slice(0, 3).join(','),
-                location: { lat: Number(place.lat), lng: Number(place.lon) },
-                rating: 4.0 + (Math.random() * 0.9), // Generate a realistic random rating
-                ratingCount: Math.floor(Math.random() * 100) + 10,
-                image: fallbackImage,
-                priceLevel: Math.floor(Math.random() * 3) + 1,
-                tags: ['cafe', 'local'],
-              },
-              { upsert: true, new: true, setDefaultsOnInsert: true }
-            );
+        if (useGoogle) {
+          // --- GOOGLE PLACES API (Real ratings, photos, data) ---
+          const qParam = q ? encodeURIComponent(q) : 'cafe';
+          const radiusMeters = radius ? Number(radius) * 1000 : 5000;
+          const gUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${qParam}&location=${lat},${lng}&radius=${radiusMeters}&type=cafe|restaurant&key=${apiKey}`;
+          
+          const response = await fetch(gUrl);
+          const data = await response.json();
+          
+          if (data.results && data.results.length > 0) {
+            const upsertPromises = data.results.map(async (place) => {
+              const photoUrl = place.photos && place.photos.length > 0 
+                ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=800&photoreference=${place.photos[0].photo_reference}&key=${apiKey}`
+                : '';
+                
+              return Cafe.findOneAndUpdate(
+                { externalId: `g_${place.place_id}` },
+                {
+                  name: place.name,
+                  externalId: `g_${place.place_id}`,
+                  address: place.formatted_address,
+                  location: { lat: place.geometry.location.lat, lng: place.geometry.location.lng },
+                  rating: place.rating, // REAL rating
+                  ratingCount: place.user_ratings_total, // REAL count
+                  image: photoUrl, // REAL photo
+                  priceLevel: place.price_level || 2,
+                  tags: place.types || ['cafe'],
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+              );
+            });
+            const docs = await Promise.all(upsertPromises);
+            docs.forEach(doc => {
+              if (doc && doc._id) upsertedIds.add(doc._id.toString());
+            });
+          }
+        } else {
+          // --- NOMINATIM FALLBACK (No fake data!) ---
+          const degreeOffset = (radius ? Number(radius) : 10) / 111;
+          const left = Number(lng) - degreeOffset;
+          const right = Number(lng) + degreeOffset;
+          const top = Number(lat) + degreeOffset;
+          const bottom = Number(lat) - degreeOffset;
+          const viewbox = `${left},${top},${right},${bottom}`;
+          
+          const qParam = q ? encodeURIComponent(q) : 'cafe';
+          const nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${qParam}&limit=20&viewbox=${viewbox}&bounded=1&accept-language=en`;
+          
+          const response = await fetch(nomUrl, {
+            headers: { 'User-Agent': 'SwiggyPlusInterviewApp/1.0' }
           });
-          const docs = await Promise.all(upsertPromises);
-          docs.forEach(doc => {
-            if (doc && doc._id) upsertedIds.add(doc._id.toString());
-          });
+          const data = await response.json();
+          
+          if (data && data.length > 0) {
+            const upsertPromises = data.map(async (place) => {
+              if (place.class !== 'amenity' && place.class !== 'shop') return null;
+              
+              // We DO NOT inject fake ratings or fake images anymore as requested.
+              // Missing data will be handled gracefully by the frontend.
+              return Cafe.findOneAndUpdate(
+                { externalId: `osm_${place.osm_id}` },
+                {
+                  name: place.name || 'Local Cafe',
+                  externalId: `osm_${place.osm_id}`,
+                  address: place.display_name.split(',').slice(0, 3).join(','),
+                  location: { lat: Number(place.lat), lng: Number(place.lon) },
+                  tags: ['cafe', 'local'],
+                },
+                { upsert: true, new: true, setDefaultsOnInsert: true }
+              );
+            });
+            const docs = await Promise.all(upsertPromises);
+            docs.forEach(doc => {
+              if (doc && doc._id) upsertedIds.add(doc._id.toString());
+            });
+          }
         }
       } catch (err) {
-        console.error('Nominatim API error:', err.message);
-        // Fallback to local database silently
+        console.error('Places API error:', err.message);
       }
     }
 

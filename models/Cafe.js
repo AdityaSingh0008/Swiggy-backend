@@ -8,9 +8,9 @@ const cafeSchema = new mongoose.Schema(
     tags: [{ type: String }],
     cuisine: [{ type: String }],
     priceLevel: { type: Number, min: 1, max: 4, default: 2 },
-    rating: { type: Number, default: 4.2 },
-    ratingCount: { type: Number, default: 0 },
-    image: { type: String, default: '' },
+    rating: { type: Number },
+    ratingCount: { type: Number },
+    image: { type: String },
     address: { type: String, default: '' },
     location: {
       lat: { type: Number, required: true },
