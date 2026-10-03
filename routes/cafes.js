@@ -79,7 +79,8 @@ router.get('/', optionalAuth, async (req, res) => {
           // --- GOOGLE PLACES API (Real ratings, photos, data) ---
           const qParam = q ? encodeURIComponent(q) : 'cafe';
           const radiusMeters = radius ? Number(radius) * 1000 : 5000;
-          const gUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${qParam}&location=${lat},${lng}&radius=${radiusMeters}&type=cafe|restaurant&key=${apiKey}`;
+          // Let the query handle the filtering naturally, don't restrict by invalid type string
+          const gUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${qParam}&location=${lat},${lng}&radius=${radiusMeters}&key=${apiKey}`;
           
           const response = await fetch(gUrl);
           const data = await response.json();
