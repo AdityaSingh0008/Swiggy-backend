@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 const cafeSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+    externalId: { type: String, unique: true, sparse: true },
     description: { type: String, default: '' },
     tags: [{ type: String }],
     cuisine: [{ type: String }],
