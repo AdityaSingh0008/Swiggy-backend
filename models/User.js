@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema(
     isPremium: { type: Boolean, default: false },
     premiumSince: { type: Date },
     favorites: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Cafe' }],
+    following: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    followers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     points: { type: Number, default: 0 },
     homeLocation: {
       lat: { type: Number },
@@ -41,6 +43,8 @@ userSchema.methods.toSafeObject = function () {
     premiumSince: this.premiumSince,
     points: this.points,
     favorites: this.favorites,
+    following: this.following,
+    followers: this.followers,
     homeLocation: this.homeLocation,
     createdAt: this.createdAt,
   };
