@@ -229,11 +229,52 @@ router.get('/:id', optionalAuth, async (req, res) => {
     if (!cafe) return res.status(404).json({ message: 'Cafe not found' });
 
     const pulse = await getPulse(cafe._id);
-    const reviews = await Review.find({ cafe: cafe._id })
+    
+    // Fetch local reviews
+    let reviews = await Review.find({ cafe: cafe._id })
       .sort({ createdAt: -1 })
       .limit(20)
       .populate('user', 'name avatarSeed')
       .lean();
+
+    // Fetch real Google Places reviews if available
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    if (apiKey && apiKey !== 'YOUR_GOOGLE_PLACES_API_KEY_HERE' && cafe.externalId?.startsWith('g_')) {
+      try {
+        const placeId = cafe.externalId.replace('g_', '');
+        const gUrl = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=reviews,rating,user_ratings_total&key=${apiKey}`;
+        const gRes = await fetch(gUrl);
+        const gData = await gRes.json();
+        
+        if (gData.result) {
+          // Update local cafe rating if it changed
+          if (gData.result.rating) {
+            cafe.rating = gData.result.rating;
+            cafe.ratingCount = gData.result.user_ratings_total;
+            await Cafe.updateOne({ _id: cafe._id }, { rating: cafe.rating, ratingCount: cafe.ratingCount });
+          }
+
+          // Merge Google reviews
+          if (gData.result.reviews && gData.result.reviews.length > 0) {
+            const googleReviews = gData.result.reviews.map(r => ({
+              _id: `g_${r.time}`,
+              rating: r.rating,
+              comment: r.text,
+              createdAt: new Date(r.time * 1000),
+              user: {
+                name: r.author_name,
+                avatarSeed: r.author_name, // Will generate a dicebear avatar based on name
+              },
+              isGoogleReview: true
+            }));
+            
+            reviews = [...googleReviews, ...reviews].sort((a, b) => b.createdAt - a.createdAt);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch Google reviews:', err.message);
+      }
+    }
 
     const isFavorite = req.user ? req.user.favorites.some((f) => f.toString() === cafe._id.toString()) : false;
 
