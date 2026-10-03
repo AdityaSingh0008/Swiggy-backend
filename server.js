@@ -13,6 +13,7 @@ import checkinRoutes from './routes/checkins.js';
 import favoriteRoutes from './routes/favorites.js';
 import reviewRoutes from './routes/reviews.js';
 import userRoutes from './routes/users.js';
+import aiRoutes from './routes/ai.js';
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use('/api/checkins', checkinRoutes);
 app.use('/api/favorites', favoriteRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.use((req, res) => res.status(404).json({ message: 'Route not found' }));
 
