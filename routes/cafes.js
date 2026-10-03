@@ -67,6 +67,8 @@ router.get('/', optionalAuth, async (req, res) => {
   try {
     const { lat, lng, radius, q, tag, maxPrice, minRating, sort } = req.query;
     
+    let upsertedIds = new Set();
+    
     // 1. Fetch real places from Nominatim (OpenStreetMap) dynamically (no API key needed!)
     if (lat && lng) {
       try {
@@ -89,7 +91,7 @@ router.get('/', optionalAuth, async (req, res) => {
         if (data && data.length > 0) {
           // Upsert Nominatim places to our local DB
           const upsertPromises = data.map(async (place) => {
-            if (place.class !== 'amenity' && place.class !== 'shop') return;
+            if (place.class !== 'amenity' && place.class !== 'shop') return null;
             
             // Generate a random stable photo for the place since OSM doesn't provide photos
             const photoId = Math.abs(Number(place.osm_id)) % 20;
@@ -111,7 +113,10 @@ router.get('/', optionalAuth, async (req, res) => {
               { upsert: true, new: true, setDefaultsOnInsert: true }
             );
           });
-          await Promise.all(upsertPromises);
+          const docs = await Promise.all(upsertPromises);
+          docs.forEach(doc => {
+            if (doc && doc._id) upsertedIds.add(doc._id.toString());
+          });
         }
       } catch (err) {
         console.error('Nominatim API error:', err.message);
@@ -123,13 +128,21 @@ router.get('/', optionalAuth, async (req, res) => {
     let cafes = await Cafe.find().lean();
 
     if (q) {
-      const query = q.toLowerCase();
-      cafes = cafes.filter(
-        (c) =>
-          c.name.toLowerCase().includes(query) ||
-          c.tags.some((t) => t.toLowerCase().includes(query)) ||
-          c.cuisine.some((c2) => c2.toLowerCase().includes(query))
-      );
+      const queryWords = q.toLowerCase().split(/\s+/).filter(w => !['in','at','around','near','cafes','cafe','restaurant','restaurants'].includes(w));
+      const query = queryWords.join(' ');
+      
+      cafes = cafes.filter((c) => {
+        // If it was just directly fetched from OSM matching their query, definitely include it!
+        if (upsertedIds.has(c._id.toString())) return true;
+        
+        // Otherwise do a loose text match
+        if (!query) return true; // If they just searched "cafes in", include all in radius
+        
+        return c.name.toLowerCase().includes(query) ||
+               query.includes(c.name.toLowerCase()) ||
+               c.tags.some((t) => t.toLowerCase().includes(query)) ||
+               c.cuisine.some((c2) => c2.toLowerCase().includes(query));
+      });
     }
     if (tag) {
       cafes = cafes.filter((c) => c.tags.includes(tag));
