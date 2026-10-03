@@ -1,12 +1,34 @@
 import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import Cafe from '../models/Cafe.js';
+import CheckIn from '../models/CheckIn.js';
 
 const router = express.Router();
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY || 'dummy-key',
 });
+
+// Helper to compute recent pulse
+const getPulse = async (cafeId) => {
+  const recent = await CheckIn.find({ cafe: cafeId })
+    .sort({ createdAt: -1 })
+    .limit(5)
+    .lean();
+
+  if (recent.length === 0) return null;
+
+  const getMode = (arr) =>
+    arr.sort((a, b) =>
+      arr.filter((v) => v === a).length - arr.filter((v) => v === b).length
+    ).pop();
+
+  return {
+    seatingAvailability: getMode(recent.map((r) => r.seatingAvailability).filter(Boolean)),
+    noiseLevel: getMode(recent.map((r) => r.noiseLevel).filter(Boolean)),
+    wifiSpeed: getMode(recent.map((r) => r.wifiSpeed).filter(Boolean)),
+  };
+};
 
 router.post('/recommend', async (req, res) => {
   try {
@@ -36,13 +58,24 @@ router.post('/recommend', async (req, res) => {
       });
     }
 
+    // Attach pulse data to cafes
+    const cafesWithPulse = await Promise.all(
+      cafes.map(async (c) => {
+        const pulse = await getPulse(c._id);
+        return { ...c, pulse };
+      })
+    );
+
     // Format cafes for the prompt
-    const cafesContext = cafes.map(c => `
+    const cafesContext = cafesWithPulse.map(c => `
 ID: ${c._id}
 Name: ${c.name}
 Tags: ${c.tags.join(', ')}
-Rating: ${c.rating}
-Price Level (1-4): ${c.priceLevel}
+Rating: ${c.rating || 'N/A'} (${c.ratingCount || 0} reviews)
+Price Level: ${'₹'.repeat(c.priceLevel || 2)}
+Live Seating: ${c.pulse?.seatingAvailability || 'unknown'}
+Live Noise: ${c.pulse?.noiseLevel || 'unknown'}
+Live WiFi: ${c.pulse?.wifiSpeed || 'unknown'}
 Description: ${c.description || 'No description'}
 `).join('\n');
 
@@ -73,7 +106,7 @@ Description: ${c.description || 'No description'}
       model: "claude-3-haiku-20240307",
       max_tokens: 1000,
       temperature: 0.7,
-      system: "You are an expert cafe concierge. Based on the user's mood/prompt and the provided list of local cafes, recommend the top 2-3 cafes that best fit their request. Respond with a friendly, conversational paragraph explaining why you picked them. End your response with a JSON array wrapped in <cafe_ids> tag containing ONLY the IDs of the cafes you recommended. For example: <cafe_ids>[\"id1\", \"id2\"]</cafe_ids>",
+      system: "You are an expert 'Find My Cafe' AI concierge. Based on the user's natural language request and the provided list of real-world local cafes, analyze factors such as ratings, tags, and live pulse data (noise level, seating, WiFi). Recommend the top 2-3 cafes that best fit their request. Respond with a friendly, conversational message providing CLEAR REASONS for each recommendation based on their specific needs (e.g. 'I recommend X because it currently has fast WiFi and quiet noise levels'). End your response with a JSON array wrapped in <cafe_ids> tag containing ONLY the IDs of the cafes you recommended. For example: <cafe_ids>[\"id1\", \"id2\"]</cafe_ids>",
       messages: [
         {
           role: "user",
